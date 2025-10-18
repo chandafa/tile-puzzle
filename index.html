@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tile Puzzle Solver</title>
     <style>
-        /* ... CSS Anda dari kode sebelumnya ... (Tidak ada perubahan) ... */
+        /* ... CSS Anda dari kode sebelumnya ... */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
@@ -45,6 +45,12 @@
             border-radius: 4px;
             font-family: monospace;
             font-size: 1.1em;
+            transition: background-color 0.2s; /* BARU */
+        }
+        
+        .controls input:disabled { /* BARU */
+            background-color: #f0f0f0;
+            cursor: not-allowed;
         }
 
         .controls button {
@@ -69,6 +75,25 @@
         .controls button#snapshot-btn:hover {
             background-color: #2a9e48;
         }
+        
+        /* --- BARU: Gaya untuk tombol Solve --- */
+        .controls button#solve-btn {
+            background-color: #ff9500;
+        }
+        .controls button#solve-btn:hover {
+            background-color: #d97e00;
+        }
+
+        /* --- BARU: Gaya untuk tombol disabled --- */
+        .controls button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .controls button:disabled:hover {
+            background-color: #ccc;
+        }
+        /* --- AKHIR BARU --- */
+
 
         .game-container {
             display: flex;
@@ -168,7 +193,6 @@
             transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
         }
         
-        /* Umpan balik klik tetap ada, karena elemennya masih bisa diklik */
         .tracked-board-canvas:hover {
             cursor: pointer;
             border-color: #007aff;
@@ -202,6 +226,7 @@
         <button id="start-btn">Mulai / Reset Permainan</button>
         <button id="snapshot-btn">Snapshot ke Clipboard</button>
         
+        <button id="solve-btn">Selesaikan Otomatis (A*)</button>
         <p style="font-size: 0.9em; color: #555;">
             <strong>Cara Snapshot:</strong><br>
             1. Klik tombol "Snapshot".<br>
@@ -228,12 +253,14 @@
         let emptyIndex = -1;
         let moveCount = 0;
         let moveHistory = []; 
+        let goalPositions = new Map(); // BARU: Cache untuk posisi tujuan (untuk A*)
 
         const board = document.getElementById('board');
         const statusEl = document.getElementById('status');
         const moveHistoryEl = document.getElementById('move-history');
         const startBtn = document.getElementById('start-btn');
         const snapshotBtn = document.getElementById('snapshot-btn');
+        const solveBtn = document.getElementById('solve-btn'); // BARU
         const initialInput = document.getElementById('initial-state');
         const goalInput = document.getElementById('goal-state');
 
@@ -242,9 +269,25 @@
 
         startBtn.addEventListener('click', startGame);
         snapshotBtn.addEventListener('click', snapshotToClipboard);
+        solveBtn.addEventListener('click', solvePuzzle); // BARU
 
-        // ... Fungsi startGame, drawBoard, tileClick, isMoveValid, checkWin, drawBoardToCanvas ...
-        // (Tidak ada perubahan di fungsi-fungsi ini dari versi sebelumnya)
+        // BARU: Fungsi untuk menonaktifkan/mengaktifkan kontrol
+        function setControlsDisabled(disabled) {
+            startBtn.disabled = disabled;
+            solveBtn.disabled = disabled;
+            snapshotBtn.disabled = disabled;
+            initialInput.disabled = disabled;
+            goalInput.disabled = disabled;
+        }
+
+        // BARU: Cache posisi goal untuk heuristik A*
+        function updateGoalPositions(goalStateArray) {
+            goalPositions.clear();
+            for (let i = 0; i < 9; i++) {
+                goalPositions.set(goalStateArray[i], { row: Math.floor(i / 3), col: i % 3 });
+            }
+        }
+
         function validateInput(stateStr) {
             if (stateStr.length !== 9) return false;
             const nums = stateStr.split('').map(Number).sort((a, b) => a - b);
@@ -269,11 +312,14 @@
             moveHistory = []; 
             moveHistory.push([...currentState]); 
 
+            updateGoalPositions(goalState); // BARU: Update cache posisi A*
+
             statusEl.textContent = `Langkah: ${moveCount}`;
             statusEl.style.color = "#34c759";
             
             drawBoard();
             updateMoveHistoryDisplay(); 
+            setControlsDisabled(false); // Pastikan kontrol aktif saat mulai
         }
 
         function drawBoard() {
@@ -386,31 +432,20 @@
             }
         }
 
-        // ==========================================================
-        // FUNGSI COPY DIMODIFIKASI (sebelumnya copyCanvasToClipboard)
-        // ==========================================================
         function copyStateToClipboard(boardState, index) {
-            // Cek apakah Clipboard API (untuk Teks) didukung
             if (!navigator.clipboard || !navigator.clipboard.writeText) {
                 alert('Fitur copy teks tidak didukung di browser ini.');
                 return;
             }
-
-            // --- Logika pemformatan teks (sama seperti snapshotToClipboard) ---
             let snapshotString = "";
             for (let i = 0; i < 9; i++) {
-                snapshotString += boardState[i]; // Gunakan boardState dari parameter
+                snapshotString += boardState[i];
                 if ((i + 1) % 3 === 0) {
-                    // Akhir baris
-                    if (i < 8) snapshotString += "\n"; // Tambah baris baru
+                    if (i < 8) snapshotString += "\n";
                 } else {
-                    // Antar kolom
-                    snapshotString += "\t"; // Tambah Tab
+                    snapshotString += "\t";
                 }
             }
-            // --- Akhir logika pemformatan ---
-
-            // Tulis Teks ke clipboard
             navigator.clipboard.writeText(snapshotString).then(() => {
                 alert(`Data angka (Langkah ${index}) berhasil disalin!\nSiap di-paste ke Excel.`);
             }).catch(err => {
@@ -418,17 +453,9 @@
                 alert('Gagal menyalin data angka.');
             });
         }
-        // ==========================================================
-        // AKHIR FUNGSI MODIFIKASI
-        // ==========================================================
 
-        
-        // ==========================================================
-        // FUNGSI UPDATE RIWAYAT DIMODIFIKASI
-        // ==========================================================
         function updateMoveHistoryDisplay() {
             moveHistoryEl.innerHTML = ''; 
-
             if (moveHistory.length === 0) {
                 moveHistoryEl.textContent = "Belum ada gerakan.";
             } else {
@@ -436,16 +463,9 @@
                     const canvas = document.createElement('canvas');
                     canvas.classList.add('tracked-board-canvas');
                     drawBoardToCanvas(canvas, boardState); 
-                    
-                    // --- MODIFIKASI ---
-                    // Beri judul (tooltip) baru
                     canvas.title = `Salin data angka Langkah ke-${index} (untuk Excel)`; 
-                    // Tambahkan event listener untuk menyalin Teks/Angka
                     canvas.addEventListener('click', () => copyStateToClipboard(boardState, index));
-                    // --- AKHIR MODIFIKASI ---
-                    
                     moveHistoryEl.appendChild(canvas);
-
                     if (index < moveHistory.length - 1) {
                         const separator = document.createElement('span');
                         separator.classList.add('move-separator');
@@ -454,14 +474,10 @@
                     }
                 });
             }
-            moveHistoryEl.scrollLeft = moveHistoryEl.scrollWidth;
+            // Scroll ke akhir riwayat
+            moveHistoryEl.scrollTop = moveHistoryEl.scrollHeight;
         }
-        // ==========================================================
-        // AKHIR MODIFIKASI
-        // ==========================================================
 
-        // Fungsi ini (snapshotToClipboard) tidak diubah, 
-        // fungsinya untuk menyalin state SAAT INI
         function snapshotToClipboard() {
             if (currentState.length === 0) {
                 alert("Mulai permainan terlebih dahulu!");
@@ -469,7 +485,7 @@
             }
             let snapshotString = "";
             for (let i = 0; i < 9; i++) {
-                snapshotString += currentState[i]; // Gunakan currentState
+                snapshotString += currentState[i];
                 if ((i + 1) % 3 === 0) {
                     if (i < 8) snapshotString += "\n";
                 } else {
@@ -483,6 +499,207 @@
                 alert("Gagal menyalin ke clipboard.");
             });
         }
+
+
+        // ==========================================================
+        // --- SEMUA FUNGSI BARU UNTUK A* SOLVER ---
+        // ==========================================================
+
+        // Fungsi utama yang dipanggil tombol "Solve"
+        function solvePuzzle() {
+            // 1. Reset papan ke state input
+            startGame(); 
+            setControlsDisabled(true); // Nonaktifkan tombol
+            
+            const startState = [...currentState];
+            const goalStateStr = goalState.toString();
+            
+            // 2. Cek Solvabilitas
+            if (getInversionCount(startState) % 2 !== getInversionCount(goalState) % 2) {
+                statusEl.textContent = "Puzzle ini tidak dapat diselesaikan!";
+                statusEl.style.color = "#ff3b30";
+                setControlsDisabled(false);
+                return;
+            }
+
+            statusEl.textContent = "Mencari solusi... (A*)";
+            statusEl.style.color = "#ff9500"; // Warna "Bekerja"
+
+            // 3. Jalankan A* di timeout agar UI sempat update
+            setTimeout(() => {
+                const openSet = []; // Bertindak sebagai Priority Queue
+                const closedSet = new Map(); // Key: state string, Value: g_cost
+
+                const startNode = {
+                    state: startState,
+                    g_cost: 0,
+                    h_cost: calculateManhattanDistance(startState),
+                    f_cost: calculateManhattanDistance(startState),
+                    parent: null
+                };
+
+                openSet.push(startNode);
+                closedSet.set(startState.toString(), 0);
+
+                let solutionNode = null;
+                let iterations = 0;
+                const MAX_ITERATIONS = 20000; // Pengaman
+
+                // 4. A* Loop
+                while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
+                    iterations++;
+                    // Ambil node dengan f_cost terendah (simulasi Priority Queue)
+                    openSet.sort((a, b) => a.f_cost - b.f_cost);
+                    const currentNode = openSet.shift();
+
+                    // Cek apakah ini tujuan
+                    if (currentNode.state.toString() === goalStateStr) {
+                        solutionNode = currentNode;
+                        break;
+                    }
+
+                    const neighbors = getNeighbors(currentNode.state);
+                    
+                    for (const neighborState of neighbors) {
+                        const new_g_cost = currentNode.g_cost + 1;
+                        const neighborStateStr = neighborState.toString();
+
+                        // Jika sudah ada di closedSet dengan g_cost lebih baik, abaikan
+                        if (closedSet.has(neighborStateStr) && closedSet.get(neighborStateStr) <= new_g_cost) {
+                            continue;
+                        }
+
+                        // Ini adalah path baru atau path yang lebih baik
+                        const h_cost = calculateManhattanDistance(neighborState);
+                        const neighborNode = {
+                            state: neighborState,
+                            g_cost: new_g_cost,
+                            h_cost: h_cost,
+                            f_cost: new_g_cost + h_cost,
+                            parent: currentNode
+                        };
+                        
+                        openSet.push(neighborNode);
+                        closedSet.set(neighborStateStr, new_g_cost);
+                    }
+                }
+
+                // 5. Handle Hasil
+                if (solutionNode) {
+                    const path = reconstructPath(solutionNode);
+                    animateSolution(path); // Mulai animasi
+                } else {
+                    statusEl.textContent = "Gagal menemukan solusi (timeout).";
+                    statusEl.style.color = "#ff3b30";
+                    setControlsDisabled(false);
+                }
+            }, 50); // Delay 50ms agar status "Mencari..." tampil
+        }
+
+        // Helper: Menghitung Inversi untuk cek solvabilitas
+        function getInversionCount(state) {
+            let inversions = 0;
+            const stateNoZero = state.filter(n => n !== 0);
+            for (let i = 0; i < stateNoZero.length - 1; i++) {
+                for (let j = i + 1; j < stateNoZero.length; j++) {
+                    if (stateNoZero[i] > stateNoZero[j]) {
+                        inversions++;
+                    }
+                }
+            }
+            return inversions;
+        }
+
+        // Helper: Heuristik Manhattan Distance
+        function calculateManhattanDistance(state) {
+            let distance = 0;
+            for (let i = 0; i < 9; i++) {
+                const tile = state[i];
+                if (tile !== 0) {
+                    const currentPos = { row: Math.floor(i / 3), col: i % 3 };
+                    const goalPos = goalPositions.get(tile); // Ambil dari cache
+                    distance += Math.abs(currentPos.row - goalPos.row) + Math.abs(currentPos.col - goalPos.col);
+                }
+            }
+            return distance;
+        }
+
+        // Helper: Mendapatkan tetangga (langkah valid berikutnya)
+        function getNeighbors(state) {
+            const neighbors = [];
+            const emptyIndex = state.indexOf(0);
+            const emptyRow = Math.floor(emptyIndex / 3);
+            const emptyCol = emptyIndex % 3;
+            
+            const moves = [
+                { dr: -1, dc: 0 }, // Up
+                { dr: 1, dc: 0 },  // Down
+                { dr: 0, dc: -1 }, // Left
+                { dr: 0, dc: 1 }   // Right
+            ];
+            
+            for (const move of moves) {
+                const newRow = emptyRow + move.dr;
+                const newCol = emptyCol + move.dc;
+                
+                if (newRow >= 0 && newRow < 3 && newCol >= 0 && newCol < 3) {
+                    const newIndex = newRow * 3 + newCol;
+                    const newState = [...state];
+                    [newState[emptyIndex], newState[newIndex]] = [newState[newIndex], newState[emptyIndex]];
+                    neighbors.push(newState);
+                }
+            }
+            return neighbors;
+        }
+
+        // Helper: Membangun path dari node tujuan kembali ke awal
+        function reconstructPath(node) {
+            const path = [];
+            let current = node;
+            while (current) {
+                path.push(current.state);
+                current = current.parent;
+            }
+            return path.reverse(); // Balik agar dari awal -> akhir
+        }
+
+        // Fungsi untuk menganimasikan solusi
+        function animateSolution(path) {
+            if (path.length === 0) {
+                // Selesai
+                setControlsDisabled(false); // Aktifkan kembali kontrol
+                checkWin(); // Panggil checkWin final
+                return;
+            }
+
+            const nextState = path.shift();
+            
+            // Path[0] adalah start state, yang sudah ada di moveHistory[0].
+            // Jadi kita lewati jika state-nya sama dengan yang terakhir di riwayat.
+            if (moveHistory.length > 0 && nextState.toString() === moveHistory[moveHistory.length - 1].toString()) {
+                animateSolution(path); // Panggil rekursif untuk state berikutnya
+                return;
+            }
+
+            // Update state global
+            currentState = nextState;
+            emptyIndex = currentState.indexOf(0);
+            moveCount++;
+            moveHistory.push([...currentState]);
+            
+            // Update UI
+            statusEl.textContent = `Langkah (Otomatis): ${moveCount}`;
+            statusEl.style.color = "#ff9500";
+            drawBoard(); // Update papan utama
+            updateMoveHistoryDisplay(); // Update riwayat mini-puzzle
+            
+            // Panggil langkah berikutnya setelah delay
+            setTimeout(() => animateSolution(path), 300); // 300ms per langkah
+        }
+
+        // ==========================================================
+        // --- AKHIR FUNGSI A* SOLVER ---
+        // ==========================================================
 
         // Mulai permainan saat halaman dimuat
         startGame();
